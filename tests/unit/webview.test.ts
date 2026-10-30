@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   createPanel: vi.fn(),
   quickPick: vi.fn(),
   showErrorMessage: vi.fn(),
+  showWarningMessage: vi.fn(),
   connect: vi.fn(),
   settingsGet: vi.fn((_key: string, fallback: unknown) => fallback),
   workspace: { workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined },
@@ -43,6 +44,7 @@ vi.mock("vscode", () => {
       createWebviewPanel: mocks.createPanel,
       showQuickPick: mocks.quickPick,
       showErrorMessage: mocks.showErrorMessage,
+      showWarningMessage: mocks.showWarningMessage,
     },
   };
 });
@@ -194,6 +196,87 @@ describe("webview lifecycle", () => {
     expect(panel.post).not.toHaveBeenCalled();
     expect(sidebar.post).toHaveBeenLastCalledWith({ type: "snapshot", snapshot: host.snapshot() });
     sidebar.dispose();
+  });
+});
+
+describe("session deletion confirmation", () => {
+  function setup() {
+    const host = controller();
+    const snapshot = host.snapshot();
+    vi.spyOn(host, "snapshot").mockReturnValue({
+      ...snapshot, sessions: [{ id: "session-1", title: "Saved conversation", updated: 0 }],
+    });
+    const remove = vi.spyOn(host, "deleteSession").mockResolvedValue();
+    const ui = surface();
+    const studio = new StudioView(context(), host);
+    studio.resolveSidebar(ui.view);
+    return { ui, studio, remove };
+  }
+
+  it("requires explicit modal confirmation and passes only the selected session ID", async () => {
+    const { ui, remove } = setup();
+    mocks.showWarningMessage.mockResolvedValue("会話を削除");
+    await ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(mocks.showWarningMessage).toHaveBeenCalledExactlyOnceWith(
+      "「Saved conversation」を削除しますか？",
+      { modal: true, detail: "会話の削除は取り消せません。ワークスペースのファイルは残ります。" },
+      "会話を削除",
+    );
+    expect(remove).toHaveBeenCalledExactlyOnceWith("session-1");
+  });
+
+  it("leaves cancellation untouched and allows another attempt", async () => {
+    const { ui, remove } = setup();
+    mocks.showWarningMessage.mockResolvedValueOnce(undefined).mockResolvedValueOnce("会話を削除");
+    await ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(remove).not.toHaveBeenCalled();
+    await ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(mocks.showWarningMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["confirmation", "deletion"])("reports %s failure and releases the pending guard", async (stage) => {
+    const { ui, remove } = setup();
+    mocks.showWarningMessage.mockResolvedValue("会話を削除");
+    if (stage === "confirmation") mocks.showWarningMessage.mockRejectedValueOnce(new Error("failed"));
+    else remove.mockRejectedValueOnce(new Error("failed"));
+    await ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(ui.post).toHaveBeenLastCalledWith({ type: "error", message: "failed" });
+    await ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(mocks.showWarningMessage).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenLastCalledWith("session-1");
+  });
+
+  it("guards duplicates across sidebar and panel through confirmation and API completion", async () => {
+    const { ui, studio, remove } = setup();
+    const panel = surface();
+    mocks.createPanel.mockReturnValue({ ...panel.view, reveal: vi.fn() });
+    studio.openPanel();
+    let confirm!: (choice: string) => void;
+    let finish!: () => void;
+    mocks.showWarningMessage.mockReturnValueOnce(new Promise<string>((resolve) => { confirm = resolve; }));
+    remove.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = ui.emit({ type: "deleteSession", sessionID: "session-1" });
+    await panel.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(mocks.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    confirm("会話を削除");
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    await panel.emit({ type: "deleteSession", sessionID: "session-1" });
+    expect(mocks.showWarningMessage).toHaveBeenCalledTimes(1);
+    finish();
+    await pending;
+  });
+
+  it("rejects malformed and missing session IDs before confirmation", async () => {
+    const { ui, remove } = setup();
+    for (const sessionID of [undefined, null, 42, "", "  "]) {
+      await ui.emit({ type: "deleteSession", sessionID });
+    }
+    await ui.emit({ type: "deleteSession", sessionID: "missing" });
+    expect(mocks.showWarningMessage).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(ui.post).toHaveBeenLastCalledWith({ type: "error", message: "削除するセッションが見つかりません。" });
   });
 });
 

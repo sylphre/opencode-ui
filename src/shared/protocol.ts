@@ -164,6 +164,10 @@ export type WebviewToHost =
 export function isWebviewMessage(value: unknown): value is WebviewToHost {
   if (!value || typeof value !== "object") return false;
   const type = (value as { type?: unknown }).type;
+  if (type === "deleteSession") {
+    const sessionID = (value as { sessionID?: unknown }).sessionID;
+    return typeof sessionID === "string" && sessionID.trim().length > 0;
+  }
   if (type === "configureInstructions") return Object.keys(value).length === 1;
   return typeof type === "string";
 }

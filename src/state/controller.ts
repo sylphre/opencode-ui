@@ -40,6 +40,8 @@ export class StudioController implements vscode.Disposable {
   private selectedVariant: string | undefined;
   private selectedAgent: string | undefined;
   private generation = 0;
+  private readonly deletedSessions = new Set<string>();
+  private readonly deletingSessions = new Set<string>();
   private directory = "";
 
   constructor(
@@ -61,7 +63,7 @@ export class StudioController implements vscode.Disposable {
       recoverable: this.activity.recoverable,
       version: live?.version,
       url: live?.endpoint.url,
-      sessions: this.sessions,
+      sessions: this.sessions.filter((session) => !this.deletedSessions.has(session.id)),
       activeSessionID: this.activeSessionID,
       items: this.items,
       models: this.catalog.models,
@@ -146,6 +148,7 @@ export class StudioController implements vscode.Disposable {
   }
 
   async selectSession(sessionID: string): Promise<void> {
+    if (this.deletedSessions.has(sessionID) || this.deletingSessions.has(sessionID)) return;
     this.activeSessionID = sessionID;
     this.items = [];
     this.publish();
@@ -161,16 +164,32 @@ export class StudioController implements vscode.Disposable {
   }
 
   async deleteSession(sessionID: string): Promise<void> {
+    if (this.deletedSessions.has(sessionID) || this.deletingSessions.has(sessionID)) return;
     const client = this.requireClient();
     if (!client) return;
-    await client.session.remove({ sessionID });
-    if (this.activeSessionID === sessionID) {
-      this.activeSessionID = undefined;
-      this.items = [];
-      this.diffs = [];
+    if (this.activeSessionID === sessionID && (
+      this.activity.executionOpen || this.activity.cancelRequested ||
+      ["sending", "running", "awaitingApproval", "cancelling"].includes(this.activity.phase)
+    )) {
+      throw new Error("実行中の会話は削除できません。先に処理を停止し、停止完了を確認してください。");
     }
-    this.sessions = await listSessions(client, this.directory);
-    this.publish();
+    this.deletingSessions.add(sessionID);
+    try {
+      await client.session.remove({ sessionID });
+      this.deletedSessions.add(sessionID);
+      this.sessions = this.sessions.filter((session) => session.id !== sessionID);
+      this.approvals = this.approvals.filter((approval) => approval.sessionID !== sessionID);
+      if (this.activeSessionID === sessionID) {
+        ++this.generation;
+        this.activeSessionID = undefined;
+        this.items = [];
+        this.diffs = [];
+        this.activity = reduceActivity(initialActivity(), { type: "connected" });
+      }
+      this.publish();
+    } finally {
+      this.deletingSessions.delete(sessionID);
+    }
   }
 
   async send(text: string): Promise<void> {
@@ -181,6 +200,7 @@ export class StudioController implements vscode.Disposable {
     if (!this.activeSessionID) await this.newSession();
     const sessionID = this.activeSessionID;
     if (!sessionID) return;
+    if (this.deletingSessions.has(sessionID)) throw new Error("会話を削除しています。完了するまでお待ちください。");
     const body = `${contextBlock(this.contexts)}${trimmed}`;
     this.items = upsertItem(this.items, {
       kind: "text",
@@ -409,6 +429,7 @@ export class StudioController implements vscode.Disposable {
     if (session?.model && this.restoreSessionModel(session.model)) {
       await this.persistModelSelection();
     }
+    if (generation !== this.generation || this.activeSessionID !== sessionID) return;
     if (approvals.length > 0) {
       this.activity = reduceActivity(this.activity, { type: "approval" });
     }
@@ -420,6 +441,7 @@ export class StudioController implements vscode.Disposable {
     const data = isRecord(event.data) ? event.data : {};
     const sessionID = typeof data.sessionID === "string" ? data.sessionID : undefined;
     if (!type || type === "server.connected") return;
+    if (sessionID && this.deletedSessions.has(sessionID)) return;
     if (sessionID && this.activeSessionID && sessionID !== this.activeSessionID) {
       if (type === "session.deleted" || type === "session.created" || type === "session.renamed") {
         void this.reloadSessions();
@@ -577,15 +599,23 @@ export class StudioController implements vscode.Disposable {
 
   private async reloadTranscript(): Promise<void> {
     const client = this.connection.live?.client;
-    if (!client || !this.activeSessionID) return;
-    this.items = await loadTranscript(client, this.activeSessionID);
+    const sessionID = this.activeSessionID;
+    const generation = this.generation;
+    if (!client || !sessionID) return;
+    const items = await loadTranscript(client, sessionID);
+    if (generation !== this.generation || this.activeSessionID !== sessionID) return;
+    this.items = items;
     this.publish();
   }
 
   private async reloadDiffs(): Promise<void> {
     const client = this.connection.live?.client;
-    if (!client || !this.activeSessionID) return;
-    this.diffs = await loadDiffs(client, this.activeSessionID).catch(() => []);
+    const sessionID = this.activeSessionID;
+    const generation = this.generation;
+    if (!client || !sessionID) return;
+    const diffs = await loadDiffs(client, sessionID).catch(() => []);
+    if (generation !== this.generation || this.activeSessionID !== sessionID) return;
+    this.diffs = diffs;
     this.publish();
   }
 

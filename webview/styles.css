@@ -137,7 +137,9 @@ textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
 .model-list .sub, .drawer .sub { font-size: 10px; opacity: .7; }
 .model-list button.on, .drawer button.on { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .drawer { flex: none; max-height: 35vh; overflow: auto; padding: 6px; border-bottom: 1px solid var(--border); }
-.drawer button { width: 100%; }
+.history-row { display: flex; align-items: center; gap: 4px; }
+.drawer .history-select { flex: 1; min-width: 0; }
+.drawer .history-delete { flex: none; color: var(--vscode-errorForeground); }
 @keyframes breathe { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
 @media (max-width: 320px) { .input-hint { display: none; } .thread { padding: 16px 10px; } .variant-picker > span { display: none; } .top { gap: 0; padding: 8px 5px; } }

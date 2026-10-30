@@ -119,9 +119,9 @@ function App() {
         <div className="drawer">
           {snapshot.sessions.length === 0 ? <div className="empty"><p>履歴はありません</p></div> : null}
           {snapshot.sessions.map((session) => (
+            <div className="history-row" key={session.id}>
             <button
-              key={session.id}
-              className={session.id === snapshot.activeSessionID ? "on" : ""}
+              className={session.id === snapshot.activeSessionID ? "history-select on" : "history-select"}
               onClick={() => {
                 post({ type: "selectSession", sessionID: session.id });
                 setHistoryOpen(false);
@@ -130,6 +130,13 @@ function App() {
               <span>{session.title}</span>
               <span className="sub">{[session.agent, session.model].filter(Boolean).join(" · ")}</span>
             </button>
+            <button
+              className="history-delete"
+              aria-label={`「${session.title}」を削除`}
+              title="会話を削除"
+              onClick={() => post({ type: "deleteSession", sessionID: session.id })}
+            >削除</button>
+            </div>
           ))}
         </div>
       ) : null}

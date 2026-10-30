@@ -7,6 +7,7 @@ import type { StudioController } from "../state/controller.js";
 
 export class StudioView {
   private panel: vscode.WebviewPanel | undefined;
+  private readonly pendingDeletes = new Set<string>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -80,9 +81,24 @@ export class StudioView {
       case "renameSession":
         await this.controller.renameSession(message.sessionID, message.title);
         return;
-      case "deleteSession":
-        await this.controller.deleteSession(message.sessionID);
+      case "deleteSession": {
+        if (this.pendingDeletes.has(message.sessionID)) return;
+        this.pendingDeletes.add(message.sessionID);
+        try {
+          const session = this.controller.snapshot().sessions.find((item) => item.id === message.sessionID);
+          if (!session) throw new Error("削除するセッションが見つかりません。");
+          const remove = "会話を削除";
+          const choice = await vscode.window.showWarningMessage(
+            `「${session.title}」を削除しますか？`,
+            { modal: true, detail: "会話の削除は取り消せません。ワークスペースのファイルは残ります。" },
+            remove,
+          );
+          if (choice === remove) await this.controller.deleteSession(message.sessionID);
+        } finally {
+          this.pendingDeletes.delete(message.sessionID);
+        }
         return;
+      }
       case "send":
         await this.controller.send(message.text);
         return;
