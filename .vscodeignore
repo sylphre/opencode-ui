@@ -1,0 +1,13 @@
+src/**
+webview/**
+tests/**
+docs/**
+node_modules/**
+*.ts
+tsconfig*.json
+esbuild.mjs
+vitest.config.ts
+.git/**
+.github/**
+AGENTS.md
+**/*.map

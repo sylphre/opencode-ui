@@ -1,0 +1,162 @@
+{
+  "name": "opencode-studio",
+  "displayName": "OpenCode Studio",
+  "description": "VS Code coding agent powered by a local OpenCode v2 server",
+  "version": "0.1.0",
+  "publisher": "opencode-studio",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:opencodeStudio.sidebar",
+    "onCommand:opencodeStudio.open"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "opencode-studio",
+          "title": "OpenCode Studio",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "opencode-studio": [
+        {
+          "type": "webview",
+          "id": "opencodeStudio.sidebar",
+          "name": "OpenCode Studio"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "opencodeStudio.configureInstructions",
+        "title": "OpenCode Studio: Configure Workspace Instructions"
+      },
+      {
+        "command": "opencodeStudio.open",
+        "title": "OpenCode Studio: Open Sidebar"
+      },
+      {
+        "command": "opencodeStudio.connect",
+        "title": "OpenCode Studio: Connect"
+      },
+      {
+        "command": "opencodeStudio.disconnect",
+        "title": "OpenCode Studio: Disconnect"
+      },
+      {
+        "command": "opencodeStudio.newSession",
+        "title": "OpenCode Studio: New Session"
+      },
+      {
+        "command": "opencodeStudio.openPanel",
+        "title": "OpenCode Studio: Open Chat Panel"
+      },
+      {
+        "command": "opencodeStudio.addFileContext",
+        "title": "OpenCode Studio: Add Active File to Context"
+      },
+      {
+        "command": "opencodeStudio.addSelectionContext",
+        "title": "OpenCode Studio: Add Selection to Context"
+      },
+      {
+        "command": "opencodeStudio.stop",
+        "title": "OpenCode Studio: Stop"
+      }
+    ],
+    "configuration": {
+      "title": "OpenCode Studio",
+      "properties": {
+        "opencodeStudio.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the OpenCode v2 binary. Empty uses PATH, then ~/.opencode/bin/opencode."
+        },
+        "opencodeStudio.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Connect to the local OpenCode service when the extension activates."
+        },
+        "opencodeStudio.launchMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "attach"
+          ],
+          "default": "auto",
+          "description": "auto starts the background service when it is not running. attach only connects to an existing service."
+        },
+        "opencodeStudio.connectTimeoutMs": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "How long to wait for the OpenCode service to become healthy."
+        },
+        "opencodeStudio.defaultAgent": {
+          "type": "string",
+          "default": "",
+          "description": "Agent id used for new sessions. Empty uses the server default."
+        },
+        "opencodeStudio.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model as provider/model. Empty uses the server default."
+        },
+        "opencodeStudio.notifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show VS Code notifications for approvals and failures."
+        },
+        "opencodeStudio.logLevel": {
+          "type": "string",
+          "enum": [
+            "error",
+            "info",
+            "debug"
+          ],
+          "default": "info",
+          "description": "Extension log level."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
+    "test": "vitest run",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opencode/client": "2.2.1",
+    "highlight.js": "^11.12.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
