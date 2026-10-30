@@ -38,20 +38,24 @@ export class StudioView {
 
   private bind(webview: vscode.Webview, surface: "sidebar" | "panel"): vscode.Disposable {
     webview.options = this.options();
-    webview.html = this.html(webview, surface);
-    const subscription = this.controller.subscribe((snapshot) => {
-      this.post(webview, { type: "snapshot", snapshot });
-    });
-    webview.onDidReceiveMessage(async (message: unknown) => {
+    const messages = webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) return;
       try {
+        // The initial subscription can fire before React installs its listener.
+        if (message.type === "ready") {
+          this.post(webview, { type: "snapshot", snapshot: this.controller.snapshot() });
+        }
         await this.handle(message);
       } catch (error) {
         const text = error instanceof Error ? error.message : "操作に失敗しました";
         this.post(webview, { type: "error", message: text });
       }
     });
-    return subscription;
+    const subscription = this.controller.subscribe((snapshot) => {
+      this.post(webview, { type: "snapshot", snapshot });
+    });
+    webview.html = this.html(webview, surface);
+    return vscode.Disposable.from(messages, subscription);
   }
 
   private async handle(message: ReturnType<typeof asMessage>): Promise<void> {

@@ -23,6 +23,7 @@ import { normalizeVariant, resolveVariant } from "../session/variant.js";
 import { initialActivity, reduceActivity, type ActivityState } from "./activity.js";
 
 type Listener = (snapshot: StudioSnapshot) => void;
+const MODEL_SELECTION_KEY = "opencodeStudio.modelSelection";
 
 export class StudioController implements vscode.Disposable {
   private readonly connection = new OpenCodeConnection();
@@ -41,7 +42,10 @@ export class StudioController implements vscode.Disposable {
   private generation = 0;
   private directory = "";
 
-  constructor(private readonly output: vscode.OutputChannel) {}
+  constructor(
+    private readonly output: vscode.OutputChannel,
+    private readonly workspaceState?: Pick<vscode.Memento, "get" | "update">,
+  ) {}
 
   subscribe(listener: Listener): vscode.Disposable {
     this.listeners.add(listener);
@@ -80,16 +84,16 @@ export class StudioController implements vscode.Disposable {
   async connect(): Promise<void> {
     if (this.connecting || this.connection.live) return;
     this.connecting = true;
-    const settings = readSettings();
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    if (!folder) {
-      this.fail("ワークスペースを開いてから接続してください。");
-      return;
-    }
-    this.directory = folder.uri.fsPath;
-    this.activity = reduceActivity(this.activity, { type: "connect-start" });
-    this.publish();
     try {
+      const settings = readSettings();
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) {
+        this.fail("ワークスペースを開いてから接続してください。");
+        return;
+      }
+      this.directory = folder.uri.fsPath;
+      this.activity = reduceActivity(this.activity, { type: "connect-start" });
+      this.publish();
       const live = await this.connection.connect({
         executablePath: settings.executablePath,
         launchMode: settings.launchMode,
@@ -238,6 +242,7 @@ export class StudioController implements vscode.Disposable {
     this.selectedModel = label;
     this.selectedVariant = next;
     this.publish();
+    await this.persistModelSelection();
   }
 
   async setAgent(agentID: string): Promise<void> {
@@ -329,16 +334,48 @@ export class StudioController implements vscode.Disposable {
         this.catalog.buildAgent ??
         this.catalog.agents.find((item) => item.id === "build")?.id;
     }
-    if (model.includes("/")) this.selectedModel = model;
-    else if (!this.selectedModel) {
-      this.selectedModel = this.catalog.defaultModel ?? this.catalog.models[0]?.label;
+    let saved: unknown;
+    try {
+      saved = this.workspaceState?.get<unknown>(MODEL_SELECTION_KEY);
+    } catch (error) {
+      this.log(`model selection restore error: ${errorText(error)}`);
     }
-    if (this.selectedModel) {
-      this.selectedVariant = normalizeVariant(
-        this.selectedVariant,
-        this.variantsOf(this.selectedModel),
-      );
+    const candidates = [
+      { model: this.selectedModel, variant: this.selectedVariant },
+      isRecord(saved) ? saved : {},
+      { model },
+      { model: this.catalog.defaultModel },
+      { model: this.catalog.models[0]?.label },
+    ];
+    const selection = candidates.find((candidate) =>
+      this.catalog.models.some((item) => item.label === candidate.model),
+    );
+    this.selectedModel = typeof selection?.model === "string" ? selection.model : undefined;
+    this.selectedVariant = this.selectedModel
+      ? normalizeVariant(selection?.variant, this.variantsOf(this.selectedModel))
+      : undefined;
+  }
+
+  private async persistModelSelection(): Promise<void> {
+    if (!this.workspaceState || !this.selectedModel) return;
+    try {
+      await this.workspaceState.update(MODEL_SELECTION_KEY, {
+        model: this.selectedModel,
+        ...(this.selectedVariant ? { variant: this.selectedVariant } : {}),
+      });
+    } catch (error) {
+      this.log(`model selection save error: ${errorText(error)}`);
     }
+  }
+
+  private restoreSessionModel(model: { id: string; providerID: string; variant?: unknown }): boolean {
+    const label = `${model.providerID}/${model.id}`;
+    if (!this.catalog.models.some((item) => item.label === label)) return false;
+    const variant = normalizeVariant(model.variant, this.variantsOf(label));
+    if (this.selectedModel === label && this.selectedVariant === variant) return false;
+    this.selectedModel = label;
+    this.selectedVariant = variant;
+    return true;
   }
 
   private variantsOf(label: string): string[] {
@@ -369,10 +406,8 @@ export class StudioController implements vscode.Disposable {
     this.diffs = diffs;
     this.approvals = approvals;
     if (session?.agent) this.selectedAgent = session.agent;
-    if (session?.model) {
-      const label = `${session.model.providerID}/${session.model.id}`;
-      this.selectedModel = label;
-      this.selectedVariant = normalizeVariant(session.model.variant, this.variantsOf(label));
+    if (session?.model && this.restoreSessionModel(session.model)) {
+      await this.persistModelSelection();
     }
     if (approvals.length > 0) {
       this.activity = reduceActivity(this.activity, { type: "approval" });
@@ -506,9 +541,11 @@ export class StudioController implements vscode.Disposable {
           typeof data.model.id === "string" &&
           typeof data.model.providerID === "string"
         ) {
-          const label = `${data.model.providerID}/${data.model.id}`;
-          this.selectedModel = label;
-          this.selectedVariant = normalizeVariant(data.model.variant, this.variantsOf(label));
+          if (this.restoreSessionModel({
+            id: data.model.id,
+            providerID: data.model.providerID,
+            variant: data.model.variant,
+          })) void this.persistModelSelection();
         }
         break;
       case "session.created":

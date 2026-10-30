@@ -8,7 +8,7 @@ let controller: StudioController | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("OpenCode Studio");
-  controller = new StudioController(output);
+  controller = new StudioController(output, context.workspaceState);
   const view = new StudioView(context, controller);
 
   context.subscriptions.push(
